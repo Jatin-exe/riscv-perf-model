@@ -3,7 +3,7 @@
 import argparse
 from pathlib import Path
 from typing import List
-from utils.util import log, LogLevel, run_cmd, clean_dir, file_exists, write_file_lines
+from utils.util import log, LogLevel, run_cmd, clean_dir, file_exists
 from utils.config import BoardConfig
 
 DEFAULT_WORKLOADS = {

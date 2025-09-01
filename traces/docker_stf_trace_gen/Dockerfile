@@ -1,16 +1,16 @@
 FROM ubuntu:24.04
 
 # Set environment variables early
-ENV RISCV=/riscv \
-    QEMU_PLUGINS=/qemu/build/contrib/plugins \
-    PATH=$RISCV/bin:/opt/riscv/riscv32-elf/bin:/opt/riscv/riscv64-elf/bin:/opt/riscv/riscv32-glibc/bin:/SimPoint/bin:/qemu/build:$PATH \ 
-    DEBIAN_FRONTEND=noninteractive \
-    WORKDIR=/workspace \
-    WORKLOADS=/workloads \
-    OUTPUT=/output
+ENV RISCV=/riscv
+ENV QEMU_DIR=/qemu
+ENV QEMU_PLUGINS=/qemu/build/contrib/plugins
+ENV PATH=$RISCV/bin:/opt/riscv/riscv32-elf/bin:/opt/riscv/riscv64-elf/bin:/opt/riscv/riscv32-glibc/bin:/SimPoint/bin:/qemu/build:$PATH 
+ENV DEBIAN_FRONTEND=noninteractive
+ENV WORKLOADS=/workloads
+ENV OUTPUT=/output
 
 # Install dependencies and clean up in one layer
-RUN apt-get update && apt-get install -y \
+RUN apt update && apt install -y \
     autoconf \
     automake \
     autotools-dev \
@@ -53,8 +53,7 @@ RUN apt-get update && apt-get install -y \
     wget \
     zlib1g-dev \
     zstd \
-    && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
+    python3-yaml
 
 # Configure git for building
 RUN git config --global url."https://github.com/".insteadOf "git@github.com:" && \
@@ -62,13 +61,14 @@ RUN git config --global url."https://github.com/".insteadOf "git@github.com:" &&
     git config --global user.name "Docker Builder"
 
 # Create directory structure
-RUN mkdir -p /workloads /output /workspace $RISCV
+# RUN mkdir -p /workloads /output /workspace $RISCV
 
 # Clone repositories in RISCV directory
 WORKDIR $RISCV
-RUN git clone https://github.com/condorcomputing/condor.riscv-isa-sim.git --recurse-submodules && \
-    git clone https://github.com/sparcians/stf_tools && \
-    git clone https://github.com/riscv-software-src/riscv-pk.git
+RUN git clone https://github.com/condorcomputing/condor.riscv-isa-sim.git --recurse-submodules
+RUN git clone https://github.com/sparcians/stf_tools
+RUN git clone https://github.com/riscv-software-src/riscv-pk.git
+RUN git clone https://gitlab.com/ribeiro.v.silva/trace-gen.git
 
 # Clone QEMU and SimPoint
 WORKDIR /
@@ -76,7 +76,7 @@ RUN git clone https://gitlab.com/qemu-project/qemu.git && \
     git clone https://github.com/hanhwi/SimPoint.git
 
 # Clone workloads with Embench PR
-WORKDIR /workloads
+WORKDIR /default
 RUN git clone https://github.com/riscv-software-src/riscv-tests.git && \
     git clone -b spike-as-board https://github.com/widlarizer/embench-iot.git
 
@@ -87,15 +87,14 @@ RUN chmod +x $RISCV/get-tool.sh && \
     echo "Toolchain version:" && \
     riscv64-unknown-linux-gnu-gcc --version 2>/dev/null || echo "Toolchain setup pending"
 
-RUN mkdir -p /qemu/build
 # Build QEMU with plugins support
 WORKDIR /qemu/build
 RUN ../configure \
-        --target-list=riscv32-linux-user,riscv64-linux-user,riscv32-softmmu,riscv64-softmmu \
-        --enable-plugins \
-        --disable-docs \
-        --disable-gtk \
-        --disable-sdl 
+    --target-list=riscv32-linux-user,riscv64-linux-user,riscv32-softmmu,riscv64-softmmu \
+    --enable-plugins \
+    --disable-docs \
+    --disable-gtk \
+    --disable-sdl 
 RUN make -j$(nproc)
 RUN make install
 
@@ -116,10 +115,11 @@ RUN ../configure --prefix=$RISCV/condor.riscv-isa-sim/install
 RUN make -j$(nproc) 
 RUN make regress 
 RUN make install
+ENV STF_DIR=$RISCV/condor.riscv-isa-sim/stf_lib
 
 # Create mount points for runtime mounting
 # Environment and flow scripts will be mounted at runtime
-RUN mkdir -p /workloads/environment /flow /outputs
+RUN mkdir -p /default/environment /flow /outputs /workloads
 
 # Note: The following are mounted at runtime:
 # - Host flow scripts -> /flow
@@ -127,8 +127,12 @@ RUN mkdir -p /workloads/environment /flow /outputs
 # - Host outputs -> /outputs
 
 RUN cp $RISCV/condor.riscv-isa-sim/install/bin/spike /usr/bin/
-WORKDIR /workspace 
 
+WORKDIR $RISCV/trace-gen
+RUN make 
+RUN make install
+
+WORKDIR /workspace 
 
 CMD ["/bin/bash"]
 

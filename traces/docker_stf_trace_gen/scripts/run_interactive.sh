@@ -5,7 +5,7 @@
 # Get current directory
 CURRENT_DIR=$(pwd)
 OUTPUT_DIR="${CURRENT_DIR}/outputs"
-WORKLOADS_DIR="${CURRENT_DIR}/../workloads"
+WORKLOADS_DIR="${CURRENT_DIR}/workloads"
 
 # Create outputs directory if it doesn't exist
 mkdir -p "${OUTPUT_DIR}"
@@ -16,24 +16,23 @@ echo "  📁 Flow scripts:  ${CURRENT_DIR} -> /flow"
 echo "  📁 Environment:   ${CURRENT_DIR}/environment -> /workloads/environment"
 echo "  📁 Outputs:       ${OUTPUT_DIR} -> /outputs"
 
-# Check if workloads directory exists
-if [ -d "${WORKLOADS_DIR}" ]; then
-    echo "  📁 Workloads:     ${WORKLOADS_DIR} -> /workloads"
-    WORKLOADS_MOUNT="-v ${WORKLOADS_DIR}:/workloads"
-else
-    echo "  ⚠️  Workloads directory not found: ${WORKLOADS_DIR}"
-    WORKLOADS_MOUNT=""
-fi
-echo ""
-
+## Check if workloads directory exists
+#if [ -d "${WORKLOADS_DIR}" ]; then
+#    echo "  📁 Workloads:     ${WORKLOADS_DIR} -> /workloads"
+#    WORKLOADS_MOUNT="-v ${WORKLOADS_DIR}:/workloads"
+#else
+#    echo "  ⚠️  Workloads directory not found: ${WORKLOADS_DIR}"
+#    WORKLOADS_MOUNT=""
+#fi
+#echo ""
+#
 # Run Docker with all mounts
 docker run --rm -it \
     -v "${OUTPUT_DIR}:/outputs" \
-    -v "${CURRENT_DIR}:/flow" \
-    -v "${CURRENT_DIR}/environment:/workloads/environment" \
-    ${WORKLOADS_MOUNT} \
+    -v "${CURRENT_DIR}/flow:/flow" \
+    -v "${CURRENT_DIR}/environment:/environment" \
     -w /flow \
-    riscv-perf-model:latest \
+    riscv-perf-model:v2 \
     bash
 
 echo "🏁 Container exited. Outputs preserved in: ${OUTPUT_DIR}"
