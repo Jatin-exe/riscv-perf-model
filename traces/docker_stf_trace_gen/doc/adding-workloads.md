@@ -202,7 +202,7 @@ def build_my_benchmark(bench_name, workload_path, cc, base_cflags, platform, boa
     cflags = base_cflags.split()
     
     if platform == "baremetal":
-        env_base = f"/workloads/environment/{board}"
+        env_base = f"/environment/{board}"
         cflags.extend([f"-D{board.upper()}", "-mstrict-align", f"-I{env_base}", 
                       "-DCPU_MHZ=1", "-DWARMUP_HEAT=1"])
     
@@ -212,14 +212,14 @@ def build_my_benchmark(bench_name, workload_path, cc, base_cflags, platform, boa
         cflags.append("-DTRACE")
     
     # Compile
-    obj_file = f"/workloads/bin/{board}/{bench_name}.o"
+    obj_file = f"/outputs/{board}/bin/{workload}/{bench_name}/obj/{bench_name}.o"
     compile_cmd = [cc, "-c"] + cflags + ["-o", obj_file, str(bench_file)]
     run_cmd(compile_cmd)
     
     # Link
-    exe_path = f"/workloads/bin/{board}/{bench_name}"
+    exe_path = f"/outputs/{board}/bin/{workload}/{bench_name}/{bench_name}"
     if platform == "baremetal":
-        env_base = f"/workloads/environment/{board}"
+        env_base = f"/environment/{board}"
         env_objs = [f"{env_base}/{f}.o" for f in ["crt0", "main", "beebsc", "board", "chip", "stub", "util", "dummy-libc"]]
         link_cmd = [cc] + base_cflags.split() + [f"-T{env_base}/link.ld", "-nostartfiles", 
                    "-Wl,--no-warn-rwx-segments", "-o", exe_path, obj_file] + env_objs + ["-lc", "-lm"]
@@ -345,13 +345,13 @@ riscv64-linux-gnu-gcc -static -O2 \
 
 ```bash
 # Build specific benchmark
-./build_workload.py --workload my-benchmark --benchmark test1 --board spike
+./build_workload.py --workload my-benchmark --benchmark test1 --emulator spike
 
 # Build all benchmarks  
-./build_workload.py --workload my-benchmark --board qemu --arch rv64
+./build_workload.py --workload my-benchmark --emulator qemu --arch rv64
 
 # Build with BBV support
-./build_workload.py --workload my-benchmark --bbv --board spike
+./build_workload.py --workload my-benchmark --bbv --emulator spike
 ```
 
 ### Run Test
@@ -370,13 +370,13 @@ Check that your workload produces expected results:
 
 ```bash
 # Check binary was created
-ls -la /workloads/bin/spike/test1
+ls -la /outputs/spike/bin/<workload>/test1
 
 # Check execution logs
-cat /output/spike_output/logs/test1.log
+cat /outputs/spike/<workload>/test1/logs/test1.log
 
 # Check BBV generation (if enabled)
-ls -la /output/spike_output/bbv/test1.bbv
+ls -la /outputs/spike/<workload>/test1/bbv/test1.bbv
 ```
 
 ## Advanced Features
@@ -470,3 +470,52 @@ def build_my_benchmark(bench_name, workload_path, cc, base_cflags, platform, boa
 
 With this framework, adding new workloads should be straightforward while maintaining compatibility with the existing analysis infrastructure.
 Along with the .cfg files for each workload.
+## CoreMark Tutorial
+
+There are two supported paths to integrate CoreMark: YAML-driven (recommended) or wrapper-linking objects into our environment.
+
+Option A: YAML-driven (recommended)
+- Place CoreMark under `./workloads/coremark` (host) or inside the image under `/default/coremark`.
+- Add an entry to `environment/spike/board.yaml` (and mirror to the qemu board if needed):
+
+```yaml
+workloads:
+  coremark:
+    workload_cflags: ["-O2", "-I/workloads/coremark", "-DITERATIONS=1000", "-DHAS_FLOAT=0", "-DSEED_METHOD=SEED_ARG", "-DMEM_METHOD=MEM_MALLOC"]
+    workload_includes: []
+    workload_sources:
+      - "/workloads/coremark/core_list_join.c"
+      - "/workloads/coremark/core_main.c"
+      - "/workloads/coremark/core_matrix.c"
+      - "/workloads/coremark/core_state.c"
+      - "/workloads/coremark/core_util.c"
+    platforms:
+      baremetal:
+        environment_files: ["crt0.S", "main.c", "stub.c", "util.c"]
+```
+
+- Build and run inside the container:
+```
+python3 flow/build_workload.py --workload coremark --emulator spike --arch rv32 --platform baremetal --bbv --trace
+python3 flow/run_workload.py  --emulator spike --arch rv32 --platform baremetal --workload coremark --bbv --interval-size 10000 --clean
+python3 flow/run_simpoint.py  --emulator spike --workload coremark --max-k 10 --clean-first
+python3 flow/generate_trace.py --emulator spike --workload coremark --benchmark coremark --sliced --verify --dump --clean
+```
+
+Option B: Wrapper-link route
+- Build or obtain object files for CoreMark with a dedicated entrypoint (e.g., `int coremark_main(void)`).
+- Link into our environment:
+```
+python3 flow/build_workload.py --input-obj /path/to/coremark.o --entrypoint coremark_main \
+  --arch rv32 --platform baremetal --emulator spike --bbv
+```
+- Run binary and process:
+```
+python3 flow/run_workload.py  --emulator spike --arch rv32 --platform baremetal --binary /outputs/spike/bin/custom/coremark/coremark --bbv --interval-size 10000 --clean
+python3 flow/run_simpoint.py  --emulator spike --workload custom --max-k 10 --clean-first
+python3 flow/generate_trace.py --emulator spike --workload custom --benchmark coremark --sliced --verify --dump --clean
+```
+
+Notes
+- For baremetal, build with a newlib toolchain matching the ISA/ABI in board.yaml.
+- If you see missing symbols (e.g., setStats, printn), ensure the environment compiled `util.c` (for custom this is now automatic) or include riscv-tests common where relevant.

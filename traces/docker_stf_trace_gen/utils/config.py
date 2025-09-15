@@ -3,21 +3,21 @@
 import yaml
 import shlex
 from pathlib import Path
-from utils.util import log
+from utils.util import log, LogLevel
 
 class BoardConfig:
     """Board configuration parser with support for tagged sections"""
     
     def __init__(self, board_name):
         self.board_name = board_name
-        self.config_file = Path(f"environment/{board_name}/board.yaml")
+        self.config_file = Path(f"/environment/{board_name}/board.yaml")
         self.config = {}
         self.load_config()
     
     def load_config(self):
         """Load configuration from board-specific file"""
         if not self.config_file.exists():
-            log("ERROR", f"Board config not found: {self.config_file}")
+            log(LogLevel.ERROR, f"Board config not found: {self.config_file}", fatal=True)
             return
         
         with open(self.config_file, 'r') as f:
@@ -43,7 +43,7 @@ class BoardConfig:
                 return shlex.split(value)
             except ValueError as e:
                 # Fallback to simple split if shlex fails (e.g., unmatched quotes)
-                log("WARNING", f"Failed to parse config value '{value}' with shlex: {e}")
+                log(LogLevel.WARN, f"Failed to parse config value '{value}' with shlex: {e}")
                 return value.split()
         
         return []
@@ -124,6 +124,13 @@ class BoardConfig:
         # Apply workload-specific settings
         if workload:
             workload_config = self._get_nested_value(f'workloads.{workload}', {})
+            # Merge parent workload if specified
+            parent = workload_config.get('parent')
+            if parent:
+                parent_cfg = self._get_nested_value(f'workloads.{parent}', {}) or {}
+                for k, v in parent_cfg.items():
+                    if k not in workload_config:
+                        workload_config[k] = v
             for key, value in workload_config.items():
                 if key.startswith('workload_'):
                     # Special handling for workload_sources - preserve full key name

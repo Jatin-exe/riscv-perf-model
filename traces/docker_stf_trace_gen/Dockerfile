@@ -123,7 +123,7 @@ RUN mkdir -p /default/environment /flow /outputs /workloads
 
 # Note: The following are mounted at runtime:
 # - Host flow scripts -> /flow
-# - Host environment -> /workloads/environment  
+# - Host environment -> /environment  
 # - Host outputs -> /outputs
 
 RUN cp $RISCV/condor.riscv-isa-sim/install/bin/spike /usr/bin/
@@ -137,3 +137,64 @@ WORKDIR /workspace
 CMD ["/bin/bash"]
 
 # need to mount Volumes and show it in the documenation when runnignthis 
+
+# -----------------------------------------------------------------------------
+# Olympia (riscv-perf-model) support: clone, build, and expose 'olympia'
+# Appended at the end to preserve cache for earlier layers
+# -----------------------------------------------------------------------------
+
+# Install additional dependencies required by Sparta/Olympia
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      ca-certificates \
+      pkg-config \
+      ccache \
+      libyaml-cpp-dev \
+      libsqlite3-dev \
+      libboost-all-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Build and install Sparta (MAP) to a fixed prefix
+ARG SPARTA_VERSION=map_v2.0.21
+ENV SPARTA_PREFIX=/opt/sparta
+RUN git clone --depth 1 --branch ${SPARTA_VERSION} https://github.com/sparcians/map.git /tmp/map && \
+    mkdir -p /tmp/map/sparta/build && \
+    cd /tmp/map/sparta/build && \
+    cmake -G Ninja .. \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DGEN_DEBUG_INFO=OFF \
+      -DCMAKE_INSTALL_PREFIX=${SPARTA_PREFIX} && \
+    ninja install && \
+    cd / && rm -rf /tmp/map
+
+# Clone Olympia with submodules and build release binary
+ARG OLYMPIA_REPO=https://github.com/riscv-software-src/riscv-perf-model.git
+ARG OLYMPIA_REF=master
+ENV OLYMPIA_DIR=/opt/olympia
+RUN git clone ${OLYMPIA_REPO} -b ${OLYMPIA_REF} ${OLYMPIA_DIR} && \
+    cd ${OLYMPIA_DIR} && \
+    git submodule update --init mavis stf_lib fsl
+
+# Ensure Sparta libraries are discoverable at runtime
+ENV LD_LIBRARY_PATH=${SPARTA_PREFIX}/lib:${LD_LIBRARY_PATH}
+
+# Build Olympia
+RUN mkdir -p ${OLYMPIA_DIR}/release && \
+    cd ${OLYMPIA_DIR}/release && \
+    cmake -G Ninja .. \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DSPARTA_SEARCH_DIR=${SPARTA_PREFIX} && \
+    ninja olympia
+
+# Optional quick sanity run if sample trace exists (kept short for build time)
+RUN if [ -f "${OLYMPIA_DIR}/traces/dhry_riscv.zstf" ]; then \
+      cd ${OLYMPIA_DIR}/release && \
+      ./olympia -i100K ../traces/dhry_riscv.zstf --report-all build_sanity_report.txt; \
+    fi
+
+# Convenience: expose olympia on PATH and provide MAVIS ISA link
+RUN ln -sf ${OLYMPIA_DIR}/release/olympia /usr/local/bin/olympia && \
+    ln -sf ${OLYMPIA_DIR}/mavis/json ${OLYMPIA_DIR}/mavis_isa_files
+
+# Restore workspace as the default working directory
+WORKDIR /workspace

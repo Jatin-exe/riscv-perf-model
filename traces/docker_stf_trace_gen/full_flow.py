@@ -13,14 +13,17 @@ from utils.config import BoardConfig
 
 # do we need these functions in util.py? they seem generic enough
 def discover_workloads() -> Dict[str, str]:
-    """Discover available workloads."""
-    base_dir = Path.cwd().parent / "workloads" if (Path.cwd().parent / "workloads").exists() else Path("/workloads")
-    workloads = {
-        "embench-iot": str(base_dir / "embench-iot"),
-        "riscv-tests": str(base_dir / "riscv-tests"),
-        "dhrystone": str(base_dir / "riscv-tests")
+    """Return known workload names with best-effort paths.
+
+    Note: On host, these paths may not exist. The actual build/run happens
+    inside the container where /default/* is available. We still return
+    canonical names so interactive selection doesn't fail.
+    """
+    return {
+        "embench-iot": "/default/embench-iot",
+        "riscv-tests": "/default/riscv-tests",
+        "dhrystone": "/default/riscv-tests",
     }
-    return {k: v for k, v in workloads.items() if file_exists(v)}
 
 def get_benchmarks(workload: str, board: str = 'spike') -> List[str]:
     """Get benchmarks for a workload."""
@@ -35,19 +38,16 @@ def get_benchmarks(workload: str, board: str = 'spike') -> List[str]:
     return []
 
 def get_board_config(board: str) -> Dict:
-    """Get board configuration."""
-    try:
-        config = BoardConfig(board)
-        sample = config.get_build_config('rv32', 'baremetal')
-        return {
-            'cc': sample.get('cc', 'unknown'),
-            'supported_archs': ['rv32', 'rv64'],
-            'supported_platforms': ['baremetal', 'linux'],
-            'features': ['bbv', 'trace'] if board == 'spike' else ['bbv', 'trace']
-        }
-    except Exception as e:
-        log(LogLevel.WARN, f"Could not load board config: {e}")
-        return {'cc': 'unknown', 'supported_archs': ['rv32', 'rv64'], 'supported_platforms': ['baremetal'], 'features': []}
+    """Return board defaults without accessing container paths on host.
+
+    Actual flags are resolved inside the container when scripts run.
+    """
+    return {
+        'cc': 'unknown',
+        'supported_archs': ['rv32', 'rv64'],
+        'supported_platforms': ['baremetal', 'linux'],
+        'features': ['bbv', 'trace']
+    }
 
 class DockerOrchestrator:
     """Manages Docker container operations."""
@@ -98,22 +98,15 @@ class DockerOrchestrator:
         mounts = [
             f"-v {self.host_output_dir}:{self.container_output_dir}",
             f"-v {Path.cwd()}:{self.container_code_dir}",
-            f"-v {Path.cwd() / 'environment'}:/workloads/environment",
+            f"-v {Path.cwd() / 'environment'}:/environment",
         ]
-        if (workloads_dir := Path.cwd().parent / "workloads").exists():
+        if (workloads_dir := Path.cwd() / "workloads").exists():
             mounts.append(f"-v {workloads_dir}:/workloads")
-        mounts.extend([
-            f"-v {self.host_bin_dir}:/workloads/bin",
-            f"-v {self.host_meta_dir}:/workloads/meta",
-        ])
-        for board in ['spike', 'qemu']:
-            binary_list = self.host_meta_dir / f"binary_list_{board}.txt"
-            binary_list.touch(exist_ok=True)
-            mounts.append(f"-v {binary_list}:/workloads/binary_list_{board}.txt")
         
         docker_cmd = ["docker", "run", "--rm"] + mounts + (["-it"] if interactive else []) + \
                      [self.image_name, "bash", "-c", f"cd {self.container_code_dir} && {' '.join(command)}"]
-        return run_cmd(docker_cmd, interactive=interactive)
+        ok, out, err = run_cmd(docker_cmd)
+        return ok, out, err
 
 class WorkflowManager:
     """Manages RISC-V analysis workflow."""
@@ -208,15 +201,15 @@ class WorkflowManager:
             if self.config['enable_trace']:
                 cmd.append("--trace")
         if script == "build_workload.py":
-            cmd.extend(["--workload", self.config['workload_suite'], "--board", self.config['emulator']])
+            cmd.extend(["--workload", self.config['workload_suite'], "--emulator", self.config['emulator']])
             if self.config['benchmarks'] != ['all']:
                 cmd.extend(["--benchmark", self.config['benchmarks'][0]])
         elif script == "run_workload.py":
-            cmd.extend(["--emulator", self.config['emulator']])
+            cmd.extend(["--emulator", self.config['emulator'], "--workload", self.config['workload_suite']])
             if workload_specific and self.config['benchmarks'] != ['all']:
-                cmd.extend(["--workload", self.config['benchmarks'][0]])
+                cmd.extend(["--benchmark", self.config['benchmarks'][0]])
         elif script == "run_simpoint.py":
-            cmd.extend(["--emulator", self.config['emulator'], "--workload-type", self.config['workload_suite'], "--verbose"])
+            cmd.extend(["--emulator", self.config['emulator'], "--workload", self.config['workload_suite'], "--verbose"])
         return cmd
 
     def run_step(self, step: str, script: str, workload_specific: bool = False) -> bool:
@@ -263,7 +256,7 @@ def main():
     """Main entry point for RISC-V analysis."""
     parser = argparse.ArgumentParser(description="RISC-V Workload Analysis Orchestrator")
     parser.add_argument("--container-name", default="riscv-analysis")
-    parser.add_argument("--image-name", default="riscv-perf-model:latest")
+    parser.add_argument("--image-name", default="riscv-perf-model:olympia")
     parser.add_argument("--output-dir", default="./outputs")
     parser.add_argument("--workload", help="Workload suite")
     parser.add_argument("--benchmark", help="Specific benchmark")

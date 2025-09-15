@@ -78,7 +78,7 @@ workloads:
     workload_cflags: ["-std=gnu99", "-Wno-implicit-int", "-Wno-implicit-function-declaration"]
     workload_ldflags: []
     workload_defines: []
-    workload_includes: ["benchmarks/common"]
+    workload_includes: ["benchmarks/common", "/riscv/condor.riscv-isa-sim/riscv-tests/env", "/riscv/condor.riscv-isa-sim/riscv"]
     environment_files: ["crt0.S", "main.c", "stub.c", "util.c"]
     
     platforms:
@@ -92,6 +92,20 @@ workloads:
     parent: riscv-tests
     # Its preferred in Dhrystone to not patch the source code and fix errors using compiler flags
     workload_cflags: ["-std=gnu99", "-Wno-implicit-int", "-Wno-implicit-function-declaration"]
+
+  coremark:
+    # CoreMark single-program workload; expects a 'main' symbol which our env calls via benchmark()
+    workload_cflags: ["-O2", "-I/default/coremark", "-DITERATIONS=1000", "-DHAS_FLOAT=0", "-DSEED_METHOD=SEED_ARG", "-DMEM_METHOD=MEM_MALLOC"]
+    workload_includes: ["/default/coremark"]
+    workload_sources:
+      - "/default/coremark/core_list_join.c"
+      - "/default/coremark/core_main.c"
+      - "/default/coremark/core_matrix.c"
+      - "/default/coremark/core_state.c"
+      - "/default/coremark/core_util.c"
+    platforms:
+      baremetal:
+        environment_files: ["crt0.S", "main.c", "stub.c", "util.c"]
 
 
   #coremark: to be done

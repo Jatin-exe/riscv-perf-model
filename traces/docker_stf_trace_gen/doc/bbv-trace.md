@@ -22,7 +22,7 @@ This guide explains how to use Basic Block Vector (BBV) generation and instructi
 
 ```bash
 # Build with BBV and trace support
-./build_workload.py --workload embench-iot --benchmark md5sum --board spike --bbv --trace
+./build_workload.py --workload embench-iot --benchmark md5sum --emulator spike --bbv --trace
 
 # Run with BBV and tracing enabled
 ./run_workload.py --emulator spike --bbv --trace --workload md5sum
@@ -32,10 +32,10 @@ This guide explains how to use Basic Block Vector (BBV) generation and instructi
 
 ```bash
 # BBV files
-ls /output/spike_output/bbv/md5sum.bbv
+ls /outputs/spike/embench-iot/md5sum/bbv/md5sum.bbv
 
 # Trace files  
-ls /output/spike_output/traces/md5sum.zstf
+ls /outputs/spike/embench-iot/md5sum/traces/md5sum.zstf
 
 # Use stf_tools based stf_dump to convert STF trace files to human readable dump
 ```
@@ -151,7 +151,7 @@ Spike uses Control and Status Register (CSR) accesses to mark BBV regions:
 **Build Requirements:**
 ```bash
 # Must use --bbv flag during build to enable CSR markers
-./build_workload.py --workload embench-iot --benchmark aha-mont64 --board spike --bbv
+./build_workload.py --workload embench-iot --benchmark aha-mont64 --emulator spike --bbv
 ```
 
 **Runtime Behavior:**
@@ -169,7 +169,7 @@ QEMU uses a plugin architecture for BBV generation:
 **Build Requirements:**
 ```bash
 # --bbv flag adds -DBBV but QEMU doesn't need source markers
-./build_workload.py --workload embench-iot --benchmark aha-mont64 --board qemu --bbv
+./build_workload.py --workload embench-iot --benchmark aha-mont64 --emulator qemu --bbv
 ```
 
 **Runtime Behavior:**
@@ -204,7 +204,7 @@ Spike generates System Trace Format (STF) traces:
 **Build Requirements:**
 ```bash
 # Use --trace flag to enable trace markers
-./build_workload.py --workload embench-iot --benchmark md5sum --board spike --trace
+./build_workload.py --workload embench-iot --benchmark md5sum --emulator spike --trace
 ```
 
 **Runtime Command:**
@@ -222,7 +222,7 @@ QEMU generates human-readable assembly traces:
 **Build Requirements:**
 ```bash
 # --trace flag adds -DTRACE for potential source-level control
-./build_workload.py --workload embench-iot --benchmark md5sum --board qemu --trace  
+./build_workload.py --workload embench-iot --benchmark md5sum --emulator qemu --trace  
 ```
 
 **Runtime Command:**
@@ -300,34 +300,21 @@ result = benchmark();
 
 ### Directory Structure
 
-BBV and trace files are organized by emulator:
+BBV and traces are organized by emulator/workload/benchmark:
 
 ```
-/output/
-├── spike_output/
-│   ├── bbv/                    # Spike BBV files
-│   │   ├── md5sum.bbv
-│   │   ├── aha-mont64.bbv
-│   │   └── slre.bbv
-│   ├── traces/                 # Spike STF traces
-│   │   ├── md5sum.zstf
-│   │   ├── aha-mont64.zstf  
-│   │   └── slre.zstf
-│   └── logs/                   # Execution logs
-│       ├── md5sum.log
-│       └── ...
-└── qemu_output/
-    ├── bbv/                    # QEMU BBV files  
-    │   ├── md5sum_bbv.0.bb
-    │   ├── aha-mont64_bbv.0.bb
-    │   └── slre_bbv.0.bb
-    ├── traces/                 # QEMU assembly traces
-    │   ├── md5sum_trace.log
-    │   ├── aha-mont64_trace.log
-    │   └── slre_trace.log
-    └── logs/                   # Execution logs
-        ├── md5sum.log
-        └── ...
+/outputs/
+├── spike/
+│   └── embench-iot/
+│       └── md5sum/
+│           ├── bbv/md5sum.bbv
+│           ├── traces/md5sum.zstf
+│           └── logs/
+└── qemu/
+    └── riscv-tests/
+        └── dhrystone/
+            ├── bbv/dhrystone.bbv.0.bb
+            └── logs/
 ```
 
 ### File Naming Conventions

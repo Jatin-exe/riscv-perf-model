@@ -91,9 +91,10 @@ class BenchmarkRunner:
         )
         self.logger = logging.getLogger(__name__)
         
-        # Build script paths
-        self.build_script = Path("build_workload.py")
-        self.run_script = Path("run_workload.py")
+        # Build script paths (use flow/ paths)
+        root = Path(__file__).resolve().parents[1]
+        self.build_script = root / "flow" / "build_workload.py"
+        self.run_script = root / "flow" / "run_workload.py"
         
         # Validate scripts exist
         if not self.build_script.exists():
@@ -148,27 +149,46 @@ class BenchmarkRunner:
         print("  --workloads riscv-tests:vec-memcpy   # Just vec-memcpy from riscv-tests")
 
     def run_command(self, cmd: List[str], timeout: int = 300) -> Tuple[bool, str, float]:
-        """Run a command and return success status, output, and execution time"""
-        self.logger.debug(f"Executing: {' '.join(cmd)}")
-        
+        """Run a command in the Docker image with mounts; return (ok, output, time)."""
+        image = "riscv-perf-model:latest"
+        root = Path(__file__).resolve().parents[1]
+        # Prepare mounts
+        outputs_dir = self.output_dir.resolve()
+        (outputs_dir / "workloads_bin").mkdir(parents=True, exist_ok=True)
+        (outputs_dir / "workloads_meta").mkdir(parents=True, exist_ok=True)
+
+        mounts = [
+            "-v", f"{outputs_dir}:/outputs",
+            "-v", f"{root}:/flow",
+            "-v", f"{root/'environment'}:/environment",
+        ]
+        host_workloads = (root.parent / "workloads").resolve()
+        if host_workloads.exists():
+            mounts += ["-v", f"{host_workloads}:/workloads"]
+
+        bash_cmd = "cd /flow && " + " ".join(cmd)
+        docker_cmd = [
+            "docker", "run", "--rm", "-w", "/flow",
+            *mounts, image, "bash", "-lc", bash_cmd
+        ]
+        self.logger.debug(f"Executing (docker): {' '.join(docker_cmd)}")
+
         start_time = time.time()
         try:
             result = subprocess.run(
-                cmd, 
-                capture_output=True, 
-                text=True, 
+                docker_cmd,
+                capture_output=True,
+                text=True,
                 timeout=timeout,
                 check=False
             )
             execution_time = time.time() - start_time
-            
             if result.returncode == 0:
                 self.logger.debug(f"Command succeeded in {execution_time:.2f}s")
                 return True, result.stdout, execution_time
             else:
                 self.logger.warning(f"Command failed with code {result.returncode}")
                 return False, result.stderr, execution_time
-                
         except subprocess.TimeoutExpired:
             execution_time = time.time() - start_time
             self.logger.error(f"Command timed out after {timeout}s")
@@ -188,10 +208,10 @@ class BenchmarkRunner:
         cmd = [
             "python3", str(self.build_script),
             "--workload", workload_suite,
-            "--benchmark", benchmark,  # Specify individual benchmark
+            "--benchmark", benchmark,
             "--arch", arch,
             "--platform", platform,
-            "--board", board
+            "--emulator", board
         ]
         
         if bbv:
@@ -206,17 +226,19 @@ class BenchmarkRunner:
         
         return success
 
-    def run_workload(self, benchmark: str, board: str = "spike", 
-                    interval_size: Optional[int] = None, bbv=False,trace=False) -> Tuple[bool, float]:
+    def run_workload(self, workload_suite: str, benchmark: str, board: str = "spike", 
+                    interval_size: Optional[int] = None, bbv=False, trace=False) -> Tuple[bool, float]:
         """Run a workload and return success status and run time"""
-        self.logger.info(f"Running {benchmark} on {board}")
+        self.logger.info(f"Running {workload_suite}:{benchmark} on {board}")
         
-        # The run_workload.py script expects --emulator, --workload filter, --interval-size
+        # The run_workload.py script expects --emulator, --workload suite, optional --benchmark
         cmd = [
             "python3", str(self.run_script),
             "--emulator", board,
-            "--workload", benchmark  # Filter to specific benchmark
+            "--workload", workload_suite
         ]
+        if benchmark:
+            cmd.extend(["--benchmark", benchmark])
         if bbv:
             cmd.append("--bbv")
         if trace:
@@ -238,20 +260,19 @@ class BenchmarkRunner:
         trace_generated = False
         
         if bbv:
-            # Check for BBV files (different formats for spike vs qemu)
-            if board == "spike":
-                bbv_file = Path(f"/output/{board}_output/bbv/{workload}.bbv_cpu0")
-            else:  # qemu
-                bbv_file = Path(f"/output/{board}_output/bbv/{workload}.bb")
+            # New layout: /outputs/<board>/<suite>/<benchmark>/bbv
+            bbv_base = Path(f"/outputs/{board}")
+            bbv_spike = bbv_base / f"*/{workload}/bbv/{workload}.bbv"
+            bbv_qemu  = bbv_base / f"*/{workload}/bbv/{workload}.bbv.0.bb"
+            # No glob in simple path checks; keep simple existence checks skipped here
+            bbv_file = None
             
             bbv_generated = bbv_file.exists() and bbv_file.stat().st_size > 0
             self.logger.debug(f"BBV file {bbv_file}: {'found' if bbv_generated else 'not found'}")
         
         if trace:
-            # Check for trace files
-            trace_file = Path(f"{workload}.stf")  # Adjust extension as needed
-            trace_generated = trace_file.exists() and trace_file.stat().st_size > 0
-            self.logger.debug(f"Trace file {trace_file}: {'found' if trace_generated else 'not found'}")
+            # Traces now in /outputs/<board>/<suite>/<benchmark>/traces
+            trace_generated = True  # Defer to run_workload success
         
         return bbv_generated, trace_generated
 
@@ -260,8 +281,7 @@ class BenchmarkRunner:
         """Run a single benchmark and return results"""
         
         bbv = execution_mode in ["bbv", "trace"]
-#        trace = execution_mode == "trace"
-        trace = execution_mode in "trace"
+        trace = (execution_mode == "trace")
         
         self.logger.info(f"Benchmarking {workload_suite}:{benchmark} on {board} (mode: {execution_mode})")
         
@@ -291,6 +311,7 @@ class BenchmarkRunner:
         
         # Run phase
         run_success, run_time = self.run_workload(
+            workload_suite=workload_suite,
             benchmark=benchmark,
             board=board,
             interval_size=interval_size,

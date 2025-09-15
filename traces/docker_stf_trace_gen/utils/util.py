@@ -16,29 +16,44 @@ class LogLevel(Enum):
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s", datefmt="%H:%M:%S")
 
-def log(level: LogLevel, msg: str, file=sys.stdout):
-    """Log with ANSI color and timestamp; raises on ERROR."""
-    color = level.value
-    print(f"{color}{msg}\033[0m", file=file if level != LogLevel.ERROR else sys.stderr)
-    if level == LogLevel.ERROR:
-        exit(1)
-        raise RuntimeError(msg) # do we want to raise here? 
+def _coerce_level(level) -> LogLevel:
+    if isinstance(level, LogLevel):
+        return level
+    if isinstance(level, str):
+        key = level.strip().upper()
+        if key == "WARNING":
+            key = "WARN"
+        try:
+            return LogLevel[key]
+        except KeyError:
+            return LogLevel.INFO
+    return LogLevel.INFO
+
+def log(level: LogLevel | str, msg: str, *, fatal: bool = False, file=sys.stdout):
+    """Log with ANSI color; only exits when fatal=True."""
+    lvl = _coerce_level(level)
+    color = lvl.value
+    stream = file if lvl != LogLevel.ERROR else sys.stderr
+    print(f"{color}{msg}\033[0m", file=stream)
+    if fatal:
+        sys.exit(1)
 
     
 
 def run_cmd(cmd: List[str], cwd: Optional[Path] = None, timeout: int = 300, show: bool = True) -> Tuple[bool, str, str]:
-    """Run command, return (success, stdout, stderr)."""
+    """Run command, return (success, stdout, stderr). Non-fatal on error."""
     if show:
         log(LogLevel.DEBUG, f"Running: {' '.join(map(str, cmd))}")
     try:
-        result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout, check=False)
-        if not result.returncode == 0:
-            log(LogLevel.ERROR, f"Command failed: {result.stderr}")
-        return result.returncode == 0, result.stdout, result.stderr
+        result = subprocess.run(cmd, cwd=str(cwd) if cwd else None, capture_output=True, text=True, timeout=timeout, check=False)
+        ok = (result.returncode == 0)
+        if not ok and show:
+            log(LogLevel.WARN, f"Command failed (rc={result.returncode}): {' '.join(map(str, cmd))}\n{result.stderr}")
+        return ok, result.stdout, result.stderr
     except subprocess.TimeoutExpired:
-        log(LogLevel.ERROR, f"Timeout after {timeout}s")
+        return False, "", f"Timeout after {timeout}s"
     except Exception as e:
-        log(LogLevel.ERROR, f"Exception: {e}")
+        return False, "", f"Exception: {e}"
 
 def get_time() -> float:
     """Return current time in seconds."""
@@ -55,12 +70,18 @@ def clean_dir(path: Path) -> Path:
         shutil.rmtree(path)
     return ensure_dir(path)
 
-def validate_tool(tool: str):
-    """Check if tool is in PATH."""
-    if not shutil.which(tool):
-        log(LogLevel.ERROR, f"Tool not found: {tool}")
-        return False
-    return True
+def validate_tool(tool: str | list[str]) -> bool:
+    """Check tool(s) exist in PATH; warn if any missing; do not exit."""
+    if isinstance(tool, str):
+        tools = [tool]
+    else:
+        tools = tool
+    ok = True
+    for t in tools:
+        if not shutil.which(t):
+            log(LogLevel.WARN, f"Tool not found: {t}")
+            ok = False
+    return ok
 
 def file_exists(path: Path | str) -> bool:
     """Check if file exists."""
