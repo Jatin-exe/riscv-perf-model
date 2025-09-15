@@ -32,45 +32,38 @@ The toolchain uses [riscv-gnu-toolchain](https://github.com/riscv-collab/riscv-g
 
 
 ```mermaid
-stateDiagram-v2
-    direction LR
+flowchart TB
+classDef node fill
 
-    [*] --> Build
+%% Start
+A[Start]:::node --> B[Build]:::node
 
-    state Build {
-        direction LR
-        Src: Sources (embench-iot, riscv-tests, coremark)
-        Obj: Wrapper-link (--input-obj, --entrypoint)
-        Cfg: board.yaml (flags, includes, env)
-        Src --> BW[build_workload.py]
-        Obj --> BW
-        Cfg --> BW
-    }
+%% Build split
+B --> C[Compile from source<br/>]:::node
+B --> D[Link existing OBJ/ELF<br/>--input-obj + --entrypoint]:::node
 
-    Build --> Run
-    state Run {
-        direction LR
-        RW: run_workload.py
-        RW --> BBV: .bbv
-        RW --> STF: full .zstf (optional)
-    }
+%% Artifact
+C --> E[OBJ/ELF artifact<br/>board.yaml: flags, includes, env]:::node
+D --> E
 
-    Run --> Analyze
-    state Analyze {
-        direction LR
-        BBV --> SP: run_simpoint.py
-        SP --> P: .simpoints & .weights
-        P --> SL: generate_trace.py (sliced .zstf)
-    }
+%% Run
+E --> F[run_workload.py<br/>→ .bbv / .zstf]:::node
 
-    Analyze --> Model
-    state Model {
-        direction LR
-        SL --> OL: run_olympia.py
-        STF --> OL
-    }
+%% Outputs
+F --> G[.bbv]:::node
+F --> H[full .zstf]:::node
 
-    Model --> [*]
+%% Analyze
+G --> I[run_simpoint.py<br/>→ .simpoints &amp; .weights]:::node
+I --> J[generate_trace.py<br/>sliced STF]:::node
+
+%% Model
+J --> K[run_olympia.py<br/>sliced STF or full STF]:::node
+H --> K
+
+%% End
+K --> L[End]:::node
+
 ```
 Dependencies:
 - `board.yaml` files define compiler flags and source files
